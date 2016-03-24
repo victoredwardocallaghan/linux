@@ -64,9 +64,6 @@ struct encoder_feature_support {
 	uint32_t max_pixel_clock;
 };
 
-struct link_enc_status {
-	int dummy; /*TODO*/
-};
 struct link_encoder {
 	struct link_encoder_funcs *funcs;
 	struct adapter_service *adapter_service;
