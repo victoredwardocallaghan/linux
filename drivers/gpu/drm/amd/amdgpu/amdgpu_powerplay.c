@@ -99,6 +99,10 @@ static int amdgpu_pp_early_init(void *handle)
 
 #ifdef CONFIG_DRM_AMD_POWERPLAY
 	switch (adev->asic_type) {
+	case CHIP_POLARIS11:
+	case CHIP_POLARIS10:
+		adev->pp_enabled = true;
+		break;
 	case CHIP_TONGA:
 	case CHIP_FIJI:
 		adev->pp_enabled = (amdgpu_powerplay == 0) ? false : true;

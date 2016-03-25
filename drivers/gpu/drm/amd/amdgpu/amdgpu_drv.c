@@ -77,6 +77,7 @@ int amdgpu_vm_block_size = -1;
 int amdgpu_vm_fault_stop = 0;
 int amdgpu_vm_debug = 0;
 int amdgpu_exp_hw_support = 0;
+int amdgpu_dal = -1;
 int amdgpu_sched_jobs = 32;
 int amdgpu_sched_hw_submission = 2;
 int amdgpu_powerplay = -1;
@@ -148,6 +149,9 @@ module_param_named(vm_debug, amdgpu_vm_debug, int, 0644);
 
 MODULE_PARM_DESC(exp_hw_support, "experimental hw support (1 = enable, 0 = disable (default))");
 module_param_named(exp_hw_support, amdgpu_exp_hw_support, int, 0444);
+
+MODULE_PARM_DESC(dal, "DAL display driver (1 = enable, 0 = disable, -1 = auto (default))");
+module_param_named(dal, amdgpu_dal, int, 0444);
 
 MODULE_PARM_DESC(sched_jobs, "the max number of jobs supported in the sw queue (default 32)");
 module_param_named(sched_jobs, amdgpu_sched_jobs, int, 0444);
@@ -277,6 +281,16 @@ static struct pci_device_id pciidlist[] = {
 	{0x1002, 0x9877, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_CARRIZO|AMD_IS_APU},
 	/* stoney */
 	{0x1002, 0x98E4, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_STONEY|AMD_IS_APU},
+	/* Polaris11 */
+	{0x1002, 0x67E0, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS11},
+	{0x1002, 0x67E1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS11},
+	{0x1002, 0x67E8, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS11},
+	{0x1002, 0x67E9, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS11},
+	{0x1002, 0x67EB, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS11},
+	{0x1002, 0x67FF, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS11},
+	/* Polaris10 */
+	{0x1002, 0x67C0, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS10},
+	{0x1002, 0x67DF, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_POLARIS10},
 
 	{0, 0, 0}
 };

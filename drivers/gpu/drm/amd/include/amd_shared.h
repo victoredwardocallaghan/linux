@@ -48,6 +48,8 @@ enum amd_asic_type {
 	CHIP_FIJI,
 	CHIP_CARRIZO,
 	CHIP_STONEY,
+	CHIP_POLARIS10,
+	CHIP_POLARIS11,
 	CHIP_LAST,
 };
 

@@ -681,9 +681,10 @@ static uint32_t fw_type_convert(void *cgs_device, uint32_t fw_type)
 		result = AMDGPU_UCODE_ID_CP_MEC1;
 		break;
 	case CGS_UCODE_ID_CP_MEC_JT2:
-		if (adev->asic_type == CHIP_TONGA)
+		if (adev->asic_type == CHIP_TONGA || adev->asic_type == CHIP_POLARIS11
+		  || adev->asic_type == CHIP_POLARIS10)
 			result = AMDGPU_UCODE_ID_CP_MEC2;
-		else if (adev->asic_type == CHIP_CARRIZO)
+		else
 			result = AMDGPU_UCODE_ID_CP_MEC1;
 		break;
 	case CGS_UCODE_ID_RLC_G:
@@ -701,7 +702,7 @@ static int amdgpu_cgs_get_firmware_info(void *cgs_device,
 {
 	CGS_FUNC_ADEV;
 
-	if (CGS_UCODE_ID_SMU != type) {
+	if ((CGS_UCODE_ID_SMU != type) && (CGS_UCODE_ID_SMU_SK != type)) {
 		uint64_t gpu_addr;
 		uint32_t data_size;
 		const struct gfx_firmware_header_v1_0 *header;
@@ -741,6 +742,18 @@ static int amdgpu_cgs_get_firmware_info(void *cgs_device,
 		case CHIP_FIJI:
 			strcpy(fw_name, "amdgpu/fiji_smc.bin");
 			break;
+		case CHIP_POLARIS11:
+			if (type == CGS_UCODE_ID_SMU)
+				strcpy(fw_name, "amdgpu/polaris11_smc.bin");
+			else if (type == CGS_UCODE_ID_SMU_SK)
+				strcpy(fw_name, "amdgpu/polaris11_smc_sk.bin");
+			break;
+		case CHIP_POLARIS10:
+			if (type == CGS_UCODE_ID_SMU)
+				strcpy(fw_name, "amdgpu/polaris10_smc.bin");
+			else if (type == CGS_UCODE_ID_SMU_SK)
+				strcpy(fw_name, "amdgpu/polaris10_smc_sk.bin");
+			break;
 		default:
 			DRM_ERROR("SMC firmware not supported\n");
 			return -EINVAL;
@@ -778,6 +791,7 @@ static int amdgpu_cgs_query_system_info(void *cgs_device,
 				struct cgs_system_info *sys_info)
 {
 	CGS_FUNC_ADEV;
+	struct amdgpu_cu_info cu_info;
 
 	if (NULL == sys_info)
 		return -ENODEV;
@@ -800,6 +814,10 @@ static int amdgpu_cgs_query_system_info(void *cgs_device,
 		break;
 	case CGS_SYSTEM_INFO_PG_FLAGS:
 		sys_info->value = adev->pg_flags;
+		break;
+	case CGS_SYSTEM_INFO_GFX_CU_INFO:
+		amdgpu_asic_get_cu_info(adev, &cu_info);
+		sys_info->value = cu_info.number;
 		break;
 	default:
 		return -ENODEV;

@@ -52,8 +52,9 @@
 #include "amdgpu_irq.h"
 #include "amdgpu_ucode.h"
 #include "amdgpu_gds.h"
-#include "amd_powerplay.h"
 #include "amdgpu_acp.h"
+#include "amdgpu_dm.h"
+#include "amd_powerplay.h"
 
 #include "gpu_scheduler.h"
 
@@ -82,6 +83,7 @@ extern int amdgpu_vm_size;
 extern int amdgpu_vm_block_size;
 extern int amdgpu_vm_fault_stop;
 extern int amdgpu_vm_debug;
+extern int amdgpu_dal;
 extern int amdgpu_sched_jobs;
 extern int amdgpu_sched_hw_submission;
 extern int amdgpu_powerplay;
@@ -302,6 +304,8 @@ struct amdgpu_ring_funcs {
 	void (*insert_nop)(struct amdgpu_ring *ring, uint32_t count);
 	/* pad the indirect buffer to the necessary number of dw */
 	void (*pad_ib)(struct amdgpu_ring *ring, struct amdgpu_ib *ib);
+	unsigned (*init_cond_exec)(struct amdgpu_ring *ring);
+	void (*patch_cond_exec)(struct amdgpu_ring *ring, unsigned offset);
 };
 
 /*
@@ -748,10 +752,13 @@ int amdgpu_job_alloc(struct amdgpu_device *adev, unsigned num_ibs,
 		     struct amdgpu_job **job);
 int amdgpu_job_alloc_with_ib(struct amdgpu_device *adev, unsigned size,
 			     struct amdgpu_job **job);
+
 void amdgpu_job_free(struct amdgpu_job *job);
+void amdgpu_job_free_func(struct kref *refcount);
 int amdgpu_job_submit(struct amdgpu_job *job, struct amdgpu_ring *ring,
 		      struct amd_sched_entity *entity, void *owner,
 		      struct fence **f);
+void amdgpu_job_timeout_func(struct work_struct *work);
 
 struct amdgpu_ring {
 	struct amdgpu_device		*adev;
@@ -788,6 +795,9 @@ struct amdgpu_ring {
 	struct amdgpu_ctx	*current_ctx;
 	enum amdgpu_ring_type	type;
 	char			name[16];
+	unsigned		cond_exe_offs;
+	u64				cond_exe_gpu_addr;
+	volatile u32	*cond_exe_cpu_addr;
 };
 
 /*
@@ -1044,6 +1054,20 @@ struct amdgpu_rlc {
 	uint64_t		cp_table_gpu_addr;
 	volatile uint32_t	*cp_table_ptr;
 	u32                     cp_table_size;
+
+	/* for firmware data */
+	u32 save_and_restore_offset;
+	u32 clear_state_descriptor_offset;
+	u32 avail_scratch_ram_locations;
+	u32 reg_restore_list_size;
+	u32 reg_list_format_start;
+	u32 reg_list_format_separate_start;
+	u32 starting_offsets_start;
+	u32 reg_list_format_size_bytes;
+	u32 reg_list_size_bytes;
+
+	u32 *register_list_format;
+	u32 *register_restore;
 };
 
 struct amdgpu_mec {
@@ -1902,7 +1926,6 @@ struct amdgpu_device {
 	int				usec_timeout;
 	const struct amdgpu_asic_funcs	*asic_funcs;
 	bool				shutdown;
-	bool				suspend;
 	bool				need_dma32;
 	bool				accel_working;
 	struct work_struct 		reset_work;
@@ -1924,7 +1947,6 @@ struct amdgpu_device {
 	/* BIOS */
 	uint8_t				*bios;
 	bool				is_atom_bios;
-	uint16_t			bios_header_start;
 	struct amdgpu_bo		*stollen_vga_memory;
 	uint32_t			bios_scratch[AMDGPU_BIOS_NUM_SCRATCH];
 
@@ -1979,6 +2001,7 @@ struct amdgpu_device {
 
 	/* display */
 	struct amdgpu_mode_info		mode_info;
+	/* For pre-DCE11. DCE11 and later are in "struct amdgpu_device->dm" */
 	struct work_struct		hotplug_work;
 	struct amdgpu_irq_src		crtc_irq;
 	struct amdgpu_irq_src		pageflip_irq;
@@ -2025,6 +2048,9 @@ struct amdgpu_device {
 	/* GDS */
 	struct amdgpu_gds		gds;
 
+	/* display related functionality */
+	struct amdgpu_display_manager dm;
+
 	const struct amdgpu_ip_block_version *ip_blocks;
 	int				num_ip_blocks;
 	struct amdgpu_ip_block_status	*ip_block_status;
@@ -2058,7 +2084,7 @@ void amdgpu_io_wreg(struct amdgpu_device *adev, u32 reg, u32 v);
 
 u32 amdgpu_mm_rdoorbell(struct amdgpu_device *adev, u32 index);
 void amdgpu_mm_wdoorbell(struct amdgpu_device *adev, u32 index, u32 v);
-
+bool amdgpu_device_has_dal_support(struct amdgpu_device *adev);
 /*
  * Registers read & write functions.
  */
@@ -2180,6 +2206,8 @@ amdgpu_get_sdma_instance(struct amdgpu_ring *ring)
 #define amdgpu_ring_emit_hdp_flush(r) (r)->funcs->emit_hdp_flush((r))
 #define amdgpu_ring_emit_hdp_invalidate(r) (r)->funcs->emit_hdp_invalidate((r))
 #define amdgpu_ring_pad_ib(r, ib) ((r)->funcs->pad_ib((r), (ib)))
+#define amdgpu_ring_init_cond_exec(r) (r)->funcs->init_cond_exec((r))
+#define amdgpu_ring_patch_cond_exec(r,o) (r)->funcs->patch_cond_exec((r),(o))
 #define amdgpu_ih_get_wptr(adev) (adev)->irq.ih_funcs->get_wptr((adev))
 #define amdgpu_ih_decode_iv(adev, iv) (adev)->irq.ih_funcs->decode_iv((adev), (iv))
 #define amdgpu_ih_set_rptr(adev) (adev)->irq.ih_funcs->set_rptr((adev))
@@ -2394,6 +2422,11 @@ struct amdgpu_bo_va_mapping *
 amdgpu_cs_find_mapping(struct amdgpu_cs_parser *parser,
 		       uint64_t addr, struct amdgpu_bo **bo);
 
-#include "amdgpu_object.h"
+#if defined(CONFIG_DRM_AMD_DAL)
+int amdgpu_dm_display_resume(struct amdgpu_device *adev );
+#else
+static inline int amdgpu_dm_display_resume(struct amdgpu_device *adev) { return 0; }
+#endif
 
+#include "amdgpu_object.h"
 #endif

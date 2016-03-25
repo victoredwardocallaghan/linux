@@ -56,6 +56,11 @@ MODULE_FIRMWARE("amdgpu/carrizo_sdma1.bin");
 MODULE_FIRMWARE("amdgpu/fiji_sdma.bin");
 MODULE_FIRMWARE("amdgpu/fiji_sdma1.bin");
 MODULE_FIRMWARE("amdgpu/stoney_sdma.bin");
+MODULE_FIRMWARE("amdgpu/polaris10_sdma.bin");
+MODULE_FIRMWARE("amdgpu/polaris10_sdma1.bin");
+MODULE_FIRMWARE("amdgpu/polaris11_sdma.bin");
+MODULE_FIRMWARE("amdgpu/polaris11_sdma1.bin");
+
 
 static const u32 sdma_offsets[SDMA_MAX_INSTANCE] =
 {
@@ -99,6 +104,32 @@ static const u32 fiji_mgcg_cgcg_init[] =
 {
 	mmSDMA0_CLK_CTRL, 0xff000ff0, 0x00000100,
 	mmSDMA1_CLK_CTRL, 0xff000ff0, 0x00000100
+};
+
+static const u32 golden_settings_polaris11_a11[] =
+{
+	mmSDMA0_CHICKEN_BITS, 0xfc910007, 0x00810007,
+	mmSDMA0_GFX_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA0_RLC0_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA0_RLC1_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA1_CHICKEN_BITS, 0xfc910007, 0x00810007,
+	mmSDMA1_GFX_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA1_RLC0_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA1_RLC1_IB_CNTL, 0x800f0111, 0x00000100,
+};
+
+static const u32 golden_settings_polaris10_a11[] =
+{
+	mmSDMA0_CHICKEN_BITS, 0xfc910007, 0x00810007,
+	mmSDMA0_CLK_CTRL, 0xff000fff, 0x00000000,
+	mmSDMA0_GFX_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA0_RLC0_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA0_RLC1_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA1_CHICKEN_BITS, 0xfc910007, 0x00810007,
+	mmSDMA1_CLK_CTRL, 0xff000fff, 0x00000000,
+	mmSDMA1_GFX_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA1_RLC0_IB_CNTL, 0x800f0111, 0x00000100,
+	mmSDMA1_RLC1_IB_CNTL, 0x800f0111, 0x00000100,
 };
 
 static const u32 cz_golden_settings_a11[] =
@@ -172,6 +203,16 @@ static void sdma_v3_0_init_golden_registers(struct amdgpu_device *adev)
 						 golden_settings_tonga_a11,
 						 (const u32)ARRAY_SIZE(golden_settings_tonga_a11));
 		break;
+	case CHIP_POLARIS11:
+		amdgpu_program_register_sequence(adev,
+						 golden_settings_polaris11_a11,
+						 (const u32)ARRAY_SIZE(golden_settings_polaris11_a11));
+		break;
+	case CHIP_POLARIS10:
+		amdgpu_program_register_sequence(adev,
+						 golden_settings_polaris10_a11,
+						 (const u32)ARRAY_SIZE(golden_settings_polaris10_a11));
+		break;
 	case CHIP_CARRIZO:
 		amdgpu_program_register_sequence(adev,
 						 cz_mgcg_cgcg_init,
@@ -219,6 +260,12 @@ static int sdma_v3_0_init_microcode(struct amdgpu_device *adev)
 		break;
 	case CHIP_FIJI:
 		chip_name = "fiji";
+		break;
+	case CHIP_POLARIS11:
+		chip_name = "polaris11";
+		break;
+	case CHIP_POLARIS10:
+		chip_name = "polaris10";
 		break;
 	case CHIP_CARRIZO:
 		chip_name = "carrizo";
@@ -451,6 +498,31 @@ static void sdma_v3_0_ring_emit_fence(struct amdgpu_ring *ring, u64 addr, u64 se
 	amdgpu_ring_write(ring, SDMA_PKT_HEADER_OP(SDMA_OP_TRAP));
 	amdgpu_ring_write(ring, SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0));
 }
+
+unsigned init_cond_exec(struct amdgpu_ring *ring)
+{
+	unsigned ret;
+	amdgpu_ring_write(ring, SDMA_PKT_HEADER_OP(SDMA_OP_COND_EXE));
+	amdgpu_ring_write(ring, lower_32_bits(ring->cond_exe_gpu_addr));
+	amdgpu_ring_write(ring, upper_32_bits(ring->cond_exe_gpu_addr));
+	amdgpu_ring_write(ring, 1);
+	ret = ring->wptr;/* this is the offset we need patch later */
+	amdgpu_ring_write(ring, 0x55aa55aa);/* insert dummy here and patch it later */
+	return ret;
+}
+
+void patch_cond_exec(struct amdgpu_ring *ring, unsigned offset)
+{
+	unsigned cur;
+	BUG_ON(ring->ring[offset] != 0x55aa55aa);
+
+	cur = ring->wptr - 1;
+	if (likely(cur > offset))
+		ring->ring[offset] = cur - offset;
+	else
+		ring->ring[offset] = (ring->ring_size>>2) - offset + cur;
+}
+
 
 /**
  * sdma_v3_0_gfx_stop - stop the gfx async dma engines
